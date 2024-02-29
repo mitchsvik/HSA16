@@ -1,0 +1,102 @@
+version: '3.9'
+services:
+  mysql:
+    container_name: hsa16_mysql
+    image: mysql:8.3.0
+    restart: always
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/my.cnf://etc/mysql/conf.d/my.cnf:ro
+      - ./logs:/logs:rw
+    environment:
+      MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
+      MYSQL_DATABASE: hsa16
+      MYSQL_USER: hsa16
+      MYSQL_PASSWORD: $MYSQL_PASSWORD
+    ports:
+      - 3306:3306
+  
+  elasticsearch:
+    container_name: hsa16_elastic
+    image: elasticsearch:7.17.18
+    environment:
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      discovery.type: single-node
+    ports:
+      - 9200:9200
+    restart: unless-stopped
+
+  kibana:
+    container_name: hsa16_kibana
+    image: kibana:7.17.18
+    ports:
+      - 5601:5601
+    depends_on:
+      - elasticsearch
+    
+  logstash:
+    container_name: hsa16_logstash
+    image: logstash:7.17.18
+    ports:
+      - 5044:5044
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+      ELASTIC_HOSTS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  firebeat:
+    container_name: hsa16_firebeat
+    image: docker.elastic.co/beats/filebeat:7.17.18
+    volumes:
+      - ./filebeat/filebeat.yaml:/usr/share/filebeat/filebeat.yaml
+      - ./filebeat/mysql.yaml:/usr/share/filebeat/modules.d/mysql.yaml
+      - ./logs:/logs
+    depends_on:
+      - logstash
+      - mysql
+  
+  mongo:
+    container_name: hsa16_mongo
+    image: mongo:6.0.12
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: $MONGO_INITDB_ROOT_USERNAME
+      MONGO_INITDB_ROOT_PASSWORD: $MONGO_INITDB_ROOT_PASSWORD
+      MONGO_INITDB_DATABASE: hsa16
+    ports:
+      - 27017:27017
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_data:/data/configdb
+    networks:
+      - mongo
+    restart: always
+
+  graylog:
+    container_name: hsa16_graylog
+    image: graylog/graylog:5.2.4
+    volumes:
+      - ./graylog/graylog_journal:/usr/share/graylog/data/journal
+    environment:
+      GRAYLOG_HTTP_EXTERNAL_URI: http://graylog:9000/
+      GRAYLOG_PASSWORD_SECRET: $GRAYLOG_PASSWORD_SECRET
+    ports:
+      - 9000:9000
+    depends_on:
+      - elasticsearch
+      - mongo
+    networks:
+      - mongo
+
+volumes:
+  mysql_data:
+    driver: local
+  elasticsearch:
+    driver: local
+  mongodb_data:
+    driver: local
+
+networks:
+  mongo:
+    driver: bridge
